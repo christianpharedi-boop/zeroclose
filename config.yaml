@@ -1,0 +1,11 @@
+org_id: acme_corp
+policies: strict
+default_currency: USD
+amount_tolerance: "0.01"
+policy_file: policy.yaml
+providers:
+  stripe:
+    api_key: null
+    webhook_secret: null
+  wise:
+    api_key: null

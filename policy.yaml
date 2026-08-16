@@ -1,0 +1,9 @@
+kyc:
+  required: true
+aml:
+  enabled: true
+fx:
+  require_explicit_rate: true
+amount_thresholds:
+  manual_review_at: "10000"
+  max_amount: "1000000"
