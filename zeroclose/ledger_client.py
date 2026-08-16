@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 
-class LedgerClient:
-    """Append-only ledger boundary with deterministic local hash-chain behavior."""
+class SimulationLedgerClient:
+    """Non-durable simulation ledger for tests and local development only."""
 
     def __init__(self, endpoint: str | None = None) -> None:
         self.endpoint = endpoint
@@ -46,7 +46,13 @@ class LedgerClient:
         yield from self._events[after_sequence:]
 
 
-class VaultEqClient(LedgerClient):
+class LedgerClient(SimulationLedgerClient):
+    """Backward-compatible alias for the non-durable simulation ledger."""
+
+    pass
+
+
+class VaultEqClient(SimulationLedgerClient):
     """Adapter for the open-source VaultEq ``LedgerEngine``.
 
     VaultEq is an optional dependency. Install it from the repository with
@@ -124,7 +130,7 @@ class VaultEqClient(LedgerClient):
         return self.engine.post(request)
 
     def health(self) -> dict[str, Any]:
-        return {"ok": True, "backend": "vaulteq", "org_id": self.org_id, "chain_valid": self.verify_chain()}
+        return {"ok": True, "backend": "vaulteq", "durable": True, "org_id": self.org_id, "chain_valid": self.verify_chain()}
 
     def close(self) -> None:
         self.engine.close()

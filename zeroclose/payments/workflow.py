@@ -17,6 +17,9 @@ class WorkflowResult:
     currency: str
     reasons: list[str]
     journal_entry_id: str | None = None
+    provider_capture_id: str | None = None
+    reconciliation_required: bool = False
+    trace: list[dict[str, Any]] | None = None
 
 
 class SandboxPaymentWorkflow:
@@ -31,6 +34,8 @@ class SandboxPaymentWorkflow:
         if payment_id in self._completed:
             return self._completed[payment_id]
 
+        trace: list[dict[str, Any]] = [{"state": "intent", "payment_id": payment_id, "amount": str(amount), "currency": currency}]
+
         # 1. Policy evaluation
         decision = self.agent.authorize({
             "payment_id": payment_id,
@@ -38,11 +43,14 @@ class SandboxPaymentWorkflow:
             "currency": currency,
             "kyc_verified": kyc_verified,
         })
+        trace.append({"state": "policy", "allowed": decision.allowed, "reasons": decision.reasons})
         if not decision.allowed:
-            return WorkflowResult("rejected", payment_id, amount, currency, decision.reasons)
+            trace.append({"state": "closed", "outcome": "rejected"})
+            return WorkflowResult("rejected", payment_id, amount, currency, decision.reasons, trace=trace)
 
         # 2. Provider capture
         capture_result = self.stripe.capture(payment_id, amount, currency)
+        trace.append({"state": "provider_captured", "provider_capture_id": capture_result["id"]})
         fee = Decimal(capture_result["fee"])
         net = Decimal(capture_result["net"])
 
@@ -69,13 +77,38 @@ class SandboxPaymentWorkflow:
                     JournalLineInput("4000", Direction.CREDIT, amount_minor, currency, "Revenue"),
                 ]
             )
-            resp = self.agent.ledger.post_journal(req)
-            journal_id = resp.journal_entry_id
+            try:
+                resp = self.agent.ledger.post_journal(req)
+                journal_id = resp.journal_entry_id
+            except Exception as exc:
+                # Provider side effects and ledger writes are not one atomic transaction.
+                # Preserve an explicit open state for reconciliation instead of claiming closure.
+                trace.append({"state": "ledger_failed", "error": type(exc).__name__})
+                self.agent.ledger.append("external_side_effect_pending", {
+                    "payment_id": payment_id,
+                    "provider_capture_id": capture_result["id"],
+                    "amount": str(amount),
+                    "currency": currency,
+                    "error_type": type(exc).__name__,
+                })
+                trace.append({"state": "reconciliation_required", "provider_capture_id": capture_result["id"]})
+                return WorkflowResult(
+                    "needs_reconciliation", payment_id, amount, currency,
+                    ["provider capture succeeded but VaultEq journal posting failed"],
+                    provider_capture_id=capture_result["id"],
+                    reconciliation_required=True,
+                    trace=trace,
+                )
 
         # 4. Record generic settlement audit event
         self.agent.record_settlement(payment_id, amount, currency)
+        trace.extend([
+            {"state": "ledger_posted", "journal_entry_id": journal_id},
+            {"state": "audit_recorded"},
+            {"state": "closed", "outcome": "captured"},
+        ])
 
-        result = WorkflowResult("captured", payment_id, amount, currency, [], journal_entry_id=journal_id)
+        result = WorkflowResult("captured", payment_id, amount, currency, [], journal_entry_id=journal_id, provider_capture_id=capture_result["id"], trace=trace)
         self._completed[payment_id] = result
         return result
 

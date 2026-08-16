@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 from .config import ZeroCloseConfig
-from .ledger_client import LedgerClient
+from .ledger_client import LedgerClient, SimulationLedgerClient, VaultEqClient
 from .policy.engine import PolicyDecision, PolicyEngine
 
 
@@ -23,4 +23,11 @@ class TreasuryAgent:
         return self.ledger.append("settlement", {"reference": reference, "amount": str(amount), "currency": currency})
 
     def status(self) -> dict[str, Any]:
-        return {"org_id": self.config.org_id, "always_closed": True, "ledger_events": len(self.ledger.snapshot())}
+        durable = isinstance(self.ledger, VaultEqClient)
+        return {
+            "org_id": self.config.org_id,
+            "always_closed": True,
+            "ledger_events": len(self.ledger.snapshot()),
+            "ledger_backend": "vaulteq" if durable else "simulation",
+            "durable": durable,
+        }

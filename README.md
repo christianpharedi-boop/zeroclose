@@ -54,6 +54,8 @@ print(result.status, result.journal_entry_id)
 
 A successful capture creates a balanced VaultEq journal entry using integer minor units: Stripe balance is debited for net proceeds, processing fees are debited as an expense, and revenue is credited for the gross amount. Replaying the same payment ID returns the original result without creating a second journal entry. The Stripe connector remains deterministic until a real Stripe sandbox adapter is supplied.
 
+The default `TreasuryAgent` uses an explicitly labeled, non-durable `SimulationLedgerClient`. Real accounting should use `VaultEqClient` with a durable SQLite database. The workflow also models the external-side-effect boundary: if provider capture succeeds but VaultEq posting fails, it returns `needs_reconciliation`, records an `external_side_effect_pending` audit event, and emits a replayable execution trace instead of claiming that the operation is closed.
+
 ## Run the API
 
 ```bash
