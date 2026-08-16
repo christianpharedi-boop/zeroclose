@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 import sqlite3
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -130,6 +131,28 @@ class VaultEqClient:
 
     def verify_chain(self) -> bool:
         return self.engine.verify_audit_chain(self.org_id)
+
+    def post_capture(self, payment_id: str, amount: Decimal, fee: Decimal, net: Decimal, currency: str) -> str:
+        """Post a Stripe capture using VaultEq-native integer minor units."""
+        from vaulteq.ledger import AccountType, Direction, JournalLineInput, PostRequest
+        accounts = {a["code"] for a in self.engine.list_accounts(self.org_id)}
+        if "1000" not in accounts:
+            self.engine.create_account(self.org_id, "1000", "Stripe Balance", AccountType.ASSET, Direction.DEBIT)
+        if "4000" not in accounts:
+            self.engine.create_account(self.org_id, "4000", "Revenue", AccountType.REVENUE, Direction.CREDIT)
+        if "5000" not in accounts:
+            self.engine.create_account(self.org_id, "5000", "Stripe Fees", AccountType.EXPENSE, Direction.DEBIT)
+        request = PostRequest(
+            organization_id=self.org_id,
+            idempotency_key=f"capture_{payment_id}",
+            memo=f"Capture {payment_id}",
+            lines=[
+                JournalLineInput("1000", Direction.DEBIT, int(net * 100), currency, "Stripe Balance"),
+                JournalLineInput("5000", Direction.DEBIT, int(fee * 100), currency, "Stripe Fees"),
+                JournalLineInput("4000", Direction.CREDIT, int(amount * 100), currency, "Revenue"),
+            ],
+        )
+        return self.engine.post(request).journal_entry_id
 
     def post_journal(self, request: Any) -> Any:
         """Post a native VaultEq ``PostRequest`` atomically and idempotently."""

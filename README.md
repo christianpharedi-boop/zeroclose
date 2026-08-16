@@ -60,6 +60,10 @@ ZeroClose’s `always_closed` invariant means that every execution reaches eithe
 
 Pending captures are recoverable after process restart. `resolve_reconciliation(payment_id)` reads the durable `external_side_effect_pending` evidence, posts the VaultEq journal without recapturing the provider transaction, records `reconciliation_resolved`, and closes the controlled exception. Conflicting retries with the same payment ID but a different amount or currency are rejected. Audit verification delegates to VaultEq’s native chain verifier for durable backends and uses the simulation verifier only for the simulation backend.
 
+Bank-feed replay identities can also be persisted through the ledger backend. When `BankReconciler` receives a `ledger=VaultEqClient(...)` backend, matched bank-entry IDs are recorded as durable `bank_reconciliation_matched` events and remain protected after restart. Without a durable backend, the reconciler’s replay set is intentionally process-local simulation behavior.
+
+The payment workflow depends on backend capabilities such as `post_capture()` rather than SQLite or VaultEq engine internals. VaultEq remains responsible for balanced accounting and integer minor-unit enforcement.
+
 ## Run the API
 
 ```bash

@@ -6,7 +6,7 @@ from typing import Any
 
 from ..agent import TreasuryAgent
 from ..connectors.stripe import StripeConnector
-from ..ledger_client import VaultEqClient
+from ..ledger_client import LedgerBackend
 
 
 @dataclass
@@ -54,7 +54,7 @@ class SandboxPaymentWorkflow:
         net = Decimal(capture_result["net"])
         journal_id = None
 
-        if isinstance(self.agent.ledger, VaultEqClient):
+        if hasattr(self.agent.ledger, "post_capture"):
             try:
                 journal_id = self._post_capture_journal(payment_id, amount, fee, net, currency)
             except Exception as exc:
@@ -97,8 +97,8 @@ class SandboxPaymentWorkflow:
             if existing is not None and existing.status == "captured":
                 return existing
             raise KeyError(f"no pending reconciliation for {payment_id}")
-        if not isinstance(self.agent.ledger, VaultEqClient):
-            raise RuntimeError("durable reconciliation resolution requires VaultEqClient")
+        if not hasattr(self.agent.ledger, "post_capture"):
+            raise RuntimeError("durable reconciliation resolution requires an accounting-capable ledger backend")
 
         amount = Decimal(str(pending["amount"]))
         fee = Decimal(str(pending["fee"]))
@@ -123,21 +123,9 @@ class SandboxPaymentWorkflow:
         return result
 
     def _post_capture_journal(self, payment_id: str, amount: Decimal, fee: Decimal, net: Decimal, currency: str) -> str:
-        from vaulteq.ledger import Direction, JournalLineInput, PostRequest
-        ledger = self.agent.ledger
-        assert isinstance(ledger, VaultEqClient)
-        self._ensure_accounts(ledger)
-        req = PostRequest(
-            organization_id=ledger.org_id,
-            idempotency_key=f"capture_{payment_id}",
-            memo=f"Capture {payment_id}",
-            lines=[
-                JournalLineInput("1000", Direction.DEBIT, int(net * 100), currency, "Stripe Balance"),
-                JournalLineInput("5000", Direction.DEBIT, int(fee * 100), currency, "Stripe Fees"),
-                JournalLineInput("4000", Direction.CREDIT, int(amount * 100), currency, "Revenue"),
-            ],
-        )
-        return self.agent.ledger.post_journal(req).journal_entry_id
+        if not hasattr(self.agent.ledger, "post_capture"):
+            raise RuntimeError("accounting-capable ledger backend is required")
+        return self.agent.ledger.post_capture(payment_id, amount, fee, net, currency)
 
     def _pending_for(self, payment_id: str) -> dict[str, Any] | None:
         resolved = any(event.get("event_type") == "reconciliation_resolved" and event.get("payload", {}).get("payment_id") == payment_id for event in self.agent.ledger.snapshot())
@@ -165,12 +153,3 @@ class SandboxPaymentWorkflow:
                 return WorkflowResult("needs_reconciliation", payment_id, Decimal(str(event_amount)), event_currency, ["provider capture is awaiting reconciliation"], provider_capture_id=payload.get("provider_capture_id"), reconciliation_required=True, trace=[{"state": "recovered_pending"}])
         return None
 
-    def _ensure_accounts(self, ledger: VaultEqClient) -> None:
-        from vaulteq.ledger import AccountType, Direction
-        accounts = {a["code"] for a in ledger.engine.list_accounts(ledger.org_id)}
-        if "1000" not in accounts:
-            ledger.engine.create_account(ledger.org_id, "1000", "Stripe Balance", AccountType.ASSET, Direction.DEBIT)
-        if "4000" not in accounts:
-            ledger.engine.create_account(ledger.org_id, "4000", "Revenue", AccountType.REVENUE, Direction.CREDIT)
-        if "5000" not in accounts:
-            ledger.engine.create_account(ledger.org_id, "5000", "Stripe Fees", AccountType.EXPENSE, Direction.DEBIT)
