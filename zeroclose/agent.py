@@ -24,14 +24,16 @@ class TreasuryAgent:
 
     def status(self) -> dict[str, Any]:
         durable = isinstance(self.ledger, VaultEqClient)
-        pending = sum(1 for event in self.ledger.snapshot() if event.get("event_type") == "external_side_effect_pending")
+        events = self.ledger.snapshot()
+        resolved = {event.get("payload", {}).get("payment_id") for event in events if event.get("event_type") == "reconciliation_resolved"}
+        pending = sum(1 for event in events if event.get("event_type") == "external_side_effect_pending" and event.get("payload", {}).get("payment_id") not in resolved)
         return {
             "org_id": self.config.org_id,
             # Every workflow reaches either a normal terminal state or a controlled exception state.
             "always_closed": True,
             "financially_closed": pending == 0,
             "controlled_exception_count": pending,
-            "ledger_events": len(self.ledger.snapshot()),
+            "ledger_events": len(events),
             "ledger_backend": "vaulteq" if durable else "simulation",
             "durable": durable,
             "closure_definition": "terminal_or_controlled_exception",

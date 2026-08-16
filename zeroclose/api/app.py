@@ -54,7 +54,8 @@ def create_app(agent: TreasuryAgent | None = None, *, auditor_auth: AuditorToken
     def audit_verify(x_auditor_token: str | None = Header(default=None)) -> dict[str, Any]:
         require_auditor(x_auditor_token)
         events = treasury.ledger.snapshot()
-        return {"valid": verify_chain(events), "event_count": len(events)}
+        valid = treasury.ledger.verify_chain() if hasattr(treasury.ledger, "verify_chain") else verify_chain(events)
+        return {"valid": valid, "event_count": len(events), "backend": "vaulteq" if hasattr(treasury.ledger, "verify_chain") else "simulation"}
 
     @app.get("/audit/snapshot")
     def audit_point_in_time(sequence: int | None = None, x_auditor_token: str | None = Header(default=None)) -> dict[str, Any]:

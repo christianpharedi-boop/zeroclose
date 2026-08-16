@@ -25,6 +25,8 @@ class ZeroCloseMCP:
         if name == "status":
             return self.agent.status()
         if name == "verify_audit_chain":
+            if hasattr(self.agent.ledger, "verify_chain"):
+                return {"valid": self.agent.ledger.verify_chain(), "backend": "vaulteq"}
             from .audit.verifier import verify_chain
-            return {"valid": verify_chain(self.agent.ledger.snapshot())}
+            return {"valid": verify_chain(self.agent.ledger.snapshot()), "backend": "simulation"}
         raise KeyError(name)

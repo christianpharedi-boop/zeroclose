@@ -58,6 +58,8 @@ The default `TreasuryAgent` uses an explicitly labeled, non-durable `SimulationL
 
 ZeroClose’s `always_closed` invariant means that every execution reaches either a normal terminal state or a controlled exception state. The API separately reports `financially_closed` and `controlled_exception_count`. Duplicate provider webhooks and duplicate bank-feed entries are recognized as already processed and produce no second financial effect.
 
+Pending captures are recoverable after process restart. `resolve_reconciliation(payment_id)` reads the durable `external_side_effect_pending` evidence, posts the VaultEq journal without recapturing the provider transaction, records `reconciliation_resolved`, and closes the controlled exception. Conflicting retries with the same payment ID but a different amount or currency are rejected. Audit verification delegates to VaultEq’s native chain verifier for durable backends and uses the simulation verifier only for the simulation backend.
+
 ## Run the API
 
 ```bash
