@@ -34,6 +34,26 @@ assert ledger.verify_chain()
 
 `VaultEqClient.post_journal()` is available when a caller needs VaultEq’s native integer-minor-unit, double-entry `PostRequest` flow. The adapter does not silently convert generic ZeroClose events into journal entries; callers must choose the native journal path for balanced accounting posts.
 
+### Sandbox payment workflow
+
+The sandbox workflow now connects policy approval, the deterministic Stripe connector, VaultEq journal posting, audit events, and replay protection:
+
+```python
+from decimal import Decimal
+
+from zeroclose.agent import TreasuryAgent
+from zeroclose.connectors.stripe import StripeConnector
+from zeroclose.ledger_client import VaultEqClient
+from zeroclose.payments import SandboxPaymentWorkflow
+
+ledger = VaultEqClient("acme_corp", db_path="acme-ledger.db")
+workflow = SandboxPaymentWorkflow(TreasuryAgent("acme_corp", ledger=ledger), StripeConnector())
+result = workflow.process_capture("pay_123", Decimal("100.00"), "USD", kyc_verified=True)
+print(result.status, result.journal_entry_id)
+```
+
+A successful capture creates a balanced VaultEq journal entry using integer minor units: Stripe balance is debited for net proceeds, processing fees are debited as an expense, and revenue is credited for the gross amount. Replaying the same payment ID returns the original result without creating a second journal entry. The Stripe connector remains deterministic until a real Stripe sandbox adapter is supplied.
+
 ## Run the API
 
 ```bash
