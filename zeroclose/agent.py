@@ -4,14 +4,14 @@ from decimal import Decimal
 from typing import Any
 
 from .config import ZeroCloseConfig
-from .ledger_client import LedgerClient, SimulationLedgerClient, VaultEqClient
+from .ledger_client import LedgerBackend, SimulationLedgerClient, VaultEqClient
 from .policy.engine import PolicyDecision, PolicyEngine
 
 
 class TreasuryAgent:
-    def __init__(self, org_id: str, policies: str = "strict", *, config: ZeroCloseConfig | None = None, ledger: LedgerClient | None = None) -> None:
+    def __init__(self, org_id: str, policies: str = "strict", *, config: ZeroCloseConfig | None = None, ledger: LedgerBackend | None = None) -> None:
         self.config = config or ZeroCloseConfig(org_id=org_id, policies=policies)
-        self.ledger = ledger or LedgerClient()
+        self.ledger = ledger or SimulationLedgerClient()
         self.policy = PolicyEngine({"kyc": {"required": policies == "strict"}, "fx": {"require_explicit_rate": True}, "amount_thresholds": {"manual_review_at": "10000"}})
 
     def authorize(self, transaction: dict[str, Any]) -> PolicyDecision:
@@ -24,10 +24,15 @@ class TreasuryAgent:
 
     def status(self) -> dict[str, Any]:
         durable = isinstance(self.ledger, VaultEqClient)
+        pending = sum(1 for event in self.ledger.snapshot() if event.get("event_type") == "external_side_effect_pending")
         return {
             "org_id": self.config.org_id,
+            # Every workflow reaches either a normal terminal state or a controlled exception state.
             "always_closed": True,
+            "financially_closed": pending == 0,
+            "controlled_exception_count": pending,
             "ledger_events": len(self.ledger.snapshot()),
             "ledger_backend": "vaulteq" if durable else "simulation",
             "durable": durable,
+            "closure_definition": "terminal_or_controlled_exception",
         }

@@ -15,6 +15,7 @@ from ..connectors.stripe_mapper import map_event, verify_signature
 def create_app(agent: TreasuryAgent | None = None, *, auditor_auth: AuditorTokenAuth | None = None, stripe_webhook_secret: str | None = None) -> FastAPI:
     treasury = agent or TreasuryAgent("default")
     auth = auditor_auth or AuditorTokenAuth()
+    processed_webhooks: set[str] = set()
     app = FastAPI(title="ZeroClose Treasury API", version="0.1.0")
 
     def require_auditor(token: str | None) -> None:
@@ -41,8 +42,13 @@ def create_app(agent: TreasuryAgent | None = None, *, auditor_auth: AuditorToken
                 raise HTTPException(status_code=400, detail="invalid Stripe signature")
         payload: Any = await request.json()
         event = map_event(raw) if provider.lower() == "stripe" else payload
+        event_id = event.get("event_id") or event.get("id") if isinstance(event, dict) else None
+        if event_id and event_id in processed_webhooks:
+            return {"accepted": True, "provider": provider, "event_id": event_id, "duplicate": True}
+        if event_id:
+            processed_webhooks.add(event_id)
         treasury.ledger.append(f"{provider}_webhook", event)
-        return {"accepted": True, "provider": provider, "event_id": event.get("event_id") if isinstance(event, dict) else None}
+        return {"accepted": True, "provider": provider, "event_id": event_id, "duplicate": False}
 
     @app.get("/audit/verify")
     def audit_verify(x_auditor_token: str | None = Header(default=None)) -> dict[str, Any]:

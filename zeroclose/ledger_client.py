@@ -5,7 +5,15 @@ import json
 from datetime import datetime, timezone
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
+
+
+class LedgerBackend(Protocol):
+    """Minimal ledger contract required by ZeroClose orchestration."""
+
+    def append(self, event_type: str, payload: dict[str, Any]) -> dict[str, Any]: ...
+    def snapshot(self, *, at_sequence: int | None = None) -> list[dict[str, Any]]: ...
+    def iter_events(self, *, after_sequence: int = 0): ...
 
 
 class SimulationLedgerClient:
@@ -46,13 +54,11 @@ class SimulationLedgerClient:
         yield from self._events[after_sequence:]
 
 
-class LedgerClient(SimulationLedgerClient):
-    """Backward-compatible alias for the non-durable simulation ledger."""
-
-    pass
+# Backward-compatible name for callers that explicitly want the simulation backend.
+LedgerClient = SimulationLedgerClient
 
 
-class VaultEqClient(SimulationLedgerClient):
+class VaultEqClient:
     """Adapter for the open-source VaultEq ``LedgerEngine``.
 
     VaultEq is an optional dependency. Install it from the repository with
@@ -67,7 +73,7 @@ class VaultEqClient(SimulationLedgerClient):
             from vaulteq.ledger import LedgerEngine
         except ImportError as exc:
             raise RuntimeError("VaultEq is required for VaultEqClient; install it from the vaulteq repository") from exc
-        super().__init__(endpoint=f"sqlite://{db_path}")
+        self.endpoint = f"sqlite://{db_path}"
         self.org_id = org_id
         self.db_path = str(db_path)
         self.engine = LedgerEngine(self.db_path)
